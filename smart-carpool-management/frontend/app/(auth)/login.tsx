@@ -1,139 +1,329 @@
-import React, { useState } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TextInput, 
-  TouchableOpacity, 
-  SafeAreaView 
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+
+ import { router } from 'expo-router';
+import { supabase } from '@/lib/supabase';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useState, useEffect } from 'react';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  FadeInDown,
+  SlideInDown,
+  runOnJS,
+} from 'react-native-reanimated';
+import { BlurView } from 'expo-blur';
 
-// 1. Define your theme colors
-const COLORS = {
-  bg: '#FFFFFF',      // Background
-  text: '#111827',    // Dark text
-  muted: '#6B7280',   // Gray sub-text
-  card: '#F3F4F6',    // Input background
-  accent: '#10B981',  // Main button (Greenish)
-  primary: '#3B82F6', // Links/Secondary (Blue)
-};
-
-export default function Login() {
+export default function Index() {
   const router = useRouter();
-  
-  // 2. State management for form inputs
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [emailFocused, setEmailFocused] = useState(false);
+  const [passwordFocused, setPasswordFocused] = useState(false);
+
+  const bgOpacity = useSharedValue(0);
+
+  useEffect(() => {
+    bgOpacity.value = withTiming(1, { duration: 1000 });
+  }, []);
+<SafeAreaView style={styles.safe}>
+  <View style={styles.container}>
+    <Text style={styles.title}>Smart Carpool</Text>
+    ...
+  </View>
+</SafeAreaView>
+  const animatedBg = useAnimatedStyle(() => ({
+    opacity: bgOpacity.value,
+  }));
+
+
+const handleLogin = async () => {
+  if (!email.trim() || !password.trim()) {
+    Alert.alert('Error', 'Please enter email and password');
+    return;
+  }
+
+  try {
+    setLoading(true);
+
+    // 🔐 Real Supabase Login
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      Alert.alert('Login Failed', error.message);
+      return;
+    }
+
+    const user = data.user;
+    if (!user) {
+      Alert.alert('Error', 'User not found');
+      return;
+    }
+
+    // 🔎 Check if user exists in drivers table
+    const { data: driver } = await supabase
+      .from('drivers')
+      .select('driver_id')
+      .eq('driver_id', user.id)
+      .single();
+
+    if (driver) {
+      // 🚗 Go to Driver Home
+      router.replace('/(tabs)/driver-home');
+    } else {
+      // 🧍 Go to Rider Home
+      router.replace('/(tabs)/rider-home');
+    }
+
+  } catch (err) {
+    Alert.alert('Login Failed', 'Something went wrong');
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.container}>
-        
-        {/* Header Section */}
-        <Text style={styles.header}>Welcome Back</Text>
-        <Text style={styles.sub}>Sign in to continue your journey</Text>
+    <View style={styles.container}>
+      {/* Background fade-in */}
+      <Animated.View style={[StyleSheet.absoluteFill, styles.gradientBg, animatedBg]} />
 
-        {/* Input Fields */}
-        <TextInput 
-          placeholder="Email" 
-          placeholderTextColor={COLORS.muted}
-          style={styles.input} 
-          value={email}
-          onChangeText={setEmail}
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
-        
-        <TextInput 
-          placeholder="Password" 
-          placeholderTextColor={COLORS.muted}
-          secureTextEntry 
-          style={styles.input} 
-          value={password}
-          onChangeText={setPassword}
-        />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
+        <View style={styles.content}>
+          {/* Title + subtitle entrance */}
+          <Animated.View entering={FadeInDown.duration(800)}>
+            <Text style={styles.title}>Smart Carpool</Text>
+            <Text style={styles.subtitle}></Text>
+          </Animated.View>
 
-        {/* Action Buttons */}
-        <TouchableOpacity
-          style={styles.btn}
-          onPress={() => router.push('/(driver)/dashboard')}
-        >
-          <Text style={styles.btnText}>Login as Driver (Demo)</Text>
-        </TouchableOpacity>
+          {/* Glass card with slide entrance */}
+          <Animated.View
+            entering={SlideInDown.duration(900).delay(200)}
+            style={styles.cardContainer}
+          >
+            <BlurView
+              intensity={Platform.OS === 'ios' ? 70 : 110}
+              tint="dark"
+              style={StyleSheet.absoluteFill}
+            />
 
-        <TouchableOpacity
-          style={[styles.btn, { backgroundColor: COLORS.primary, marginTop: 12 }]}
-          onPress={() => router.push('/(rider)/dashboard')}
-        >
-          <Text style={[styles.btnText, { color: '#FFFFFF' }]}>Login as Rider (Demo)</Text>
-        </TouchableOpacity>
+            <View style={styles.glassContent}>
+              {/* Email */}
+              <View style={styles.inputWrapper}>
+                <Text
+                  style={[
+                    styles.floatingLabel,
+                    (emailFocused || email.trim().length > 0) && styles.floatingLabelActive,
+                  ]}
+                >
+                  Email
+                </Text>
+                <TextInput
+                  placeholder=""  // ← empty on purpose
+                  placeholderTextColor="#94A3B8"
+                  style={[
+                    styles.input,
+                    emailFocused && styles.inputFocused,
+                  ]}
+                  value={email}
+                  onChangeText={setEmail}
+                  onFocus={() => setEmailFocused(true)}
+                  onBlur={() => setEmailFocused(false)}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  autoCorrect={false}
+                />
+              </View>
 
-        {/* Registration Link */}
-        <TouchableOpacity 
-          style={styles.link}
-          onPress={() => router.push('/register')} 
-        >
-          <Text style={styles.linkText}>
-            Don't have an account? <Text style={{ fontWeight: '800' }}>Register</Text>
-          </Text>
-        </TouchableOpacity>
-        
-      </View>
-    </SafeAreaView>
+              {/* Password */}
+              <View style={styles.inputWrapper}>
+                <Text
+                  style={[
+                    styles.floatingLabel,
+                    (passwordFocused || password.trim().length > 0) && styles.floatingLabelActive,
+                  ]}
+                >
+                  Password
+                </Text>
+                <TextInput
+                  placeholder=""  // ← empty on purpose
+                  placeholderTextColor="#94A3B8"
+                  secureTextEntry
+                  style={[
+                    styles.input,
+                    passwordFocused && styles.inputFocused,
+                  ]}
+                  value={password}
+                  onChangeText={setPassword}
+                  onFocus={() => setPasswordFocused(true)}
+                  onBlur={() => setPasswordFocused(false)}
+                  autoCorrect={false}
+                />
+              </View>
+
+              {/* Button */}
+              <TouchableOpacity
+                style={[styles.button, loading && styles.buttonLoading]}
+                onPress={handleLogin}
+                disabled={loading}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.buttonText}>
+                  {loading ? 'Logging in...' : 'Sign In'}
+                </Text>
+              </TouchableOpacity>
+
+              {/* Register link */}
+              <TouchableOpacity
+                style={styles.link}
+                onPress={() => router.push('/(auth)/register')}
+              >
+                <Text style={styles.linkText}>
+                  Don't have an account? <Text style={styles.linkHighlight}>Register</Text>
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        </View>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
-// 3. Stylesheet using the COLORS object
 const styles = StyleSheet.create({
-  safe: { 
-    flex: 1, 
-    backgroundColor: COLORS.bg 
-  },
   container: {
     flex: 1,
-    justifyContent: "center",
-    backgroundColor: COLORS.bg,
-    padding: 28
+    paddingTop:0,
   },
-  header: {
+  gradientBg: {
+    backgroundColor: '#0F172A',
+  },
+  content: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  title: {
     fontSize: 34,
-    color: COLORS.text,
-    fontWeight: "700",
-    marginBottom: 4
+    fontFamily:'Inter-Bold',
+    fontWeight: '800',
+    color: '#F1F5F9',
+    letterSpacing: -0.4,
+    marginBottom: 8,
+    padding:5,
   },
-  sub: {
-    color: COLORS.muted,
+  subtitle: {
+    fontSize: 17,
+    color: '#94A3B8',
+    marginBottom: 44,
+  },
+  cardContainer: {
+    borderRadius: 28,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(30, 41, 59, 0.45)', // fallback
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.35,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  glassContent: {
+    padding: 32,
+    paddingTop: 50,
+    paddingBottom: 50,
+  },
+  inputWrapper: {
+    marginBottom: 24,
+    position: 'relative',
+  },
+  floatingLabel: {
+    position: 'absolute',
+    left: 20,
+    top: 18,
     fontSize: 16,
-    marginBottom: 28
+    color: '#94A3B8',
+    pointerEvents: 'none',
+    zIndex: 1,
+  },
+  floatingLabelActive: {
+    top: 8,
+    fontSize: 13,
+    color: '#22C55E',
+    // Optional: add background "cut" if border overlaps label too much
+    // backgroundColor: '#0F172A',
+    // paddingHorizontal: 6,
   },
   input: {
-    backgroundColor: COLORS.card,
-    color: COLORS.text,
-    borderRadius: 14,
-    padding: 18,
-    marginBottom: 16,
-    fontSize: 16
-  },
-  btn: {
-    backgroundColor: COLORS.accent,
-    padding: 18,
-    borderRadius: 14,
-    marginTop: 6
-  },
-  btnText: {
-    color: "#052E16",
-    textAlign: "center",
+    backgroundColor: 'rgba(30, 41, 59, 0.65)',
+    color: '#F1F5F9',
+    borderRadius: 18,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
     fontSize: 16,
-    fontWeight: "700"
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.18)',
   },
-  link: { 
-    marginTop: 24 
+  inputFocused: {
+    borderColor: '#0ed42c',
+    borderWidth: 1.2,
+    shadowColor: '#000002',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  button: {
+    backgroundColor: '#22C55E',
+    paddingVertical: 18,
+    borderRadius: 18,
+    alignItems: 'center',
+    marginTop: 12,
+    shadowColor: '#22C55E',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  buttonLoading: {
+    opacity: 0.85,
+  },
+  buttonText: {
+    color: '#052E16',
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  link: {
+    marginTop: 28,
+    alignItems: 'center',
   },
   linkText: {
-    color: COLORS.primary,
-    textAlign: "center",
+    color: '#94A3B8',
     fontSize: 15,
-    fontWeight: "600"
-  }
+  },
+  linkHighlight: {
+    color: '#3B82F6',
+    fontWeight: '600',
+  },
 });
