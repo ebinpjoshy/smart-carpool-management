@@ -18,9 +18,7 @@ import { supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
-// ────────────────────────────────────────────────
 // Geocode API Key
-// ────────────────────────────────────────────────
 const GEOCODE_API_KEY = "69995081002b9123938436hzj710469";
 
 // Dark map style
@@ -34,9 +32,7 @@ const darkMapStyle = [
 
 const { width, height } = Dimensions.get("window");
 
-// ────────────────────────────────────────────────
 // Premium Alert Component
-// ────────────────────────────────────────────────
 const CustomAlert = forwardRef((props, ref) => {
   const [visible, setVisible] = useState(false);
   const [title, setTitle] = useState("");
@@ -57,8 +53,8 @@ const CustomAlert = forwardRef((props, ref) => {
   const getColor = () => {
     switch (type) {
       case "success": return "#10B981";
-      case "error":   return "#EF4444";
-      default:        return "#7C3AED";
+      case "error": return "#EF4444";
+      default: return "#7C3AED";
     }
   };
 
@@ -115,7 +111,11 @@ export default function CreateRequest() {
   const alertRef = useRef(null);
 
   const showAlert = (title: string, message: string, type = "info") => {
-    alertRef.current?.show(title, message, type);
+    if (alertRef.current) {
+      alertRef.current.show(title, message, type);
+    } else {
+      Alert.alert(title, message);
+    }
   };
 
   useEffect(() => {
@@ -129,7 +129,7 @@ export default function CreateRequest() {
           router.replace("/(auth)/login");
         }
       } catch (err) {
-        console.error("Session load error:", err);
+        console.error("Session error:", err);
         showAlert("Error", "Could not verify login status", "error");
       } finally {
         setAuthLoading(false);
@@ -172,8 +172,8 @@ export default function CreateRequest() {
     const R = 6371;
     const dLat = (c2.lat - c1.lat) * Math.PI / 180;
     const dLon = (c2.lon - c1.lon) * Math.PI / 180;
-    const a = Math.sin(dLat/2)**2 + Math.cos(c1.lat * Math.PI/180) * Math.cos(c2.lat * Math.PI/180) * Math.sin(dLon/2)**2;
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(c1.lat * Math.PI / 180) * Math.cos(c2.lat * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   };
 
@@ -196,7 +196,7 @@ export default function CreateRequest() {
       setPickupMarker({ latitude: pickupCoord.lat, longitude: pickupCoord.lon });
       setDestMarker({ latitude: destCoord.lat, longitude: destCoord.lon });
 
-      let distanceKm = 12;
+      let distanceKm = 12; // fallback
 
       try {
         const url = `http://router.project-osrm.org/route/v1/driving/${pickupCoord.lon},${pickupCoord.lat};${destCoord.lon},${destCoord.lat}?overview=full&geometries=geojson`;
@@ -252,19 +252,20 @@ export default function CreateRequest() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.from('ride_requests').insert({
+      const { error } = await supabase.from("ride_requests").insert({
         rider_id: userId,
         pickup_location: pickupLocation.trim(),
         destination: destination.trim(),
         seats_required: seatsNum,
-        request_status: 'pending',
-        ride_id: null   // explicit NULL (safe after making nullable)
+        request_status: "pending",
+        // ride_id defaults to NULL
       });
 
       if (error) throw error;
 
       showAlert("Success", "Request created!\nDrivers will be notified.", "success");
 
+      // Reset form
       setPickupLocation("");
       setDestination("");
       setSeats("");
@@ -274,7 +275,13 @@ export default function CreateRequest() {
       setDestMarker(null);
     } catch (err: any) {
       console.error("Insert failed:", err);
-      showAlert("Failed", err.message || "Could not create request", "error");
+      let msg = err.message || "Could not create request";
+      if (err.code === "23503") {
+        msg = "Rider profile missing. Please complete registration or contact support.";
+      } else if (err.code === "PGRST204") {
+        msg = "Database schema mismatch. Check column names.";
+      }
+      showAlert("Failed", msg, "error");
     } finally {
       setLoading(false);
     }
@@ -355,7 +362,9 @@ export default function CreateRequest() {
               onPress={calculateFare}
               disabled={loading}
             >
-              {loading ? <ActivityIndicator color="#fff" /> : (
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
                 <>
                   <Ionicons name="calculator-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
                   <Text style={styles.btnText}>Calculate Fare</Text>
@@ -363,7 +372,9 @@ export default function CreateRequest() {
               )}
             </TouchableOpacity>
 
-            {estimatedFare > 0 && <Text style={styles.fare}>Estimated Fare: ₹{estimatedFare}</Text>}
+            {estimatedFare > 0 && (
+              <Text style={styles.fare}>Estimated Fare: ₹{estimatedFare}</Text>
+            )}
 
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
