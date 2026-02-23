@@ -1,3 +1,4 @@
+// app/(tabs)/driver-grouped-requests.tsx
 import { useState, useEffect } from 'react';
 import {
   View,
@@ -11,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 
 export default function DriverGroupedRequests() {
   const [groups, setGroups] = useState([]);
@@ -20,20 +22,22 @@ export default function DriverGroupedRequests() {
   // Pricing constants
   const BASE_FARE = 30;
   const RATE_PER_KM = 8;
-  const AVG_DISTANCE = 12;  // fallback, replace with real calc
+  const AVG_DISTANCE = 12; // fallback — replace with real OSRM later
+  const RIDER_SHARE = 0.6; // each rider pays 60% of full fare
 
   useEffect(() => {
     const loadGroups = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) {
         Alert.alert("Error", "Not logged in");
+        setLoading(false);
         return;
       }
       setDriverId(session.user.id);
 
       const { data: requests, error } = await supabase
         .from('ride_requests')
-        .select('*')
+        .select('request_id, pickup_location, destination, seats_required')
         .eq('request_status', 'pending');
 
       if (error) {
@@ -43,35 +47,38 @@ export default function DriverGroupedRequests() {
       }
 
       // Group by pickup + destination
-      const map = new Map();
-      requests.forEach(r => {
-        const key = `${r.pickup_location}|||${r.destination}`;
-        if (!map.has(key)) {
-          map.set(key, {
+      const groupsMap = new Map();
+
+      requests.forEach(req => {
+        const key = `${req.pickup_location}|||${req.destination}`;
+        if (!groupsMap.has(key)) {
+          groupsMap.set(key, {
             key,
-            pickup: r.pickup_location,
-            destination: r.destination,
-            requests: [],
+            pickup: req.pickup_location,
+            destination: req.destination,
             totalSeats: 0,
             riderCount: 0,
+            requestIds: [], // consistent name
           });
         }
-        const g = map.get(key);
-        g.totalSeats += r.seats_required;
-        g.riderCount += 1;
-        g.requests.push(r.request_id);
+
+        const group = groupsMap.get(key);
+        group.totalSeats += req.seats_required;
+        group.riderCount += 1;
+        group.requestIds.push(req.request_id);
       });
 
-      // Calculate earnings for each group
-      const groupedArray = Array.from(map.values()).map(g => {
-        const distanceKm = AVG_DISTANCE; // replace with real OSRM if needed
-        const fullFare = BASE_FARE + distanceKm * RATE_PER_KM; // e.g. 1000
-        const perRider = Math.round(fullFare * 0.6); // 600 each
-        const totalEarnings = perRider * g.riderCount; // 1200 for 2
+      // Calculate earnings
+      const groupedArray = Array.from(groupsMap.values()).map(g => {
+        const distanceKm = AVG_DISTANCE;
+        const fullFare = BASE_FARE + distanceKm * RATE_PER_KM;
+        const perRiderFare = Math.round(fullFare * RIDER_SHARE);
+        const totalEarnings = perRiderFare * g.riderCount;
 
         return {
           ...g,
-          perRider,
+          distanceKm,
+          perRiderFare,
           totalEarnings,
         };
       });
@@ -83,78 +90,87 @@ export default function DriverGroupedRequests() {
     loadGroups();
   }, []);
 
-const acceptGroup = async (group) => {
-  Alert.alert(
-    "Accept Group?",
-    `${group.pickup} → ${group.destination}\n` +
-    `${group.riderCount} riders • ${group.totalSeats} seats\n` +
-    `Earnings: ₹${group.totalEarnings}`,
-    [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Accept",
-        onPress: async () => {
-          try {
-            // 1. Create ride
-            const { data: ride, error: rideErr } = await supabase
-              .from('rides')
-              .insert({
-                driver_id: driverId,
-                ride_status: 'ongoing',  // or 'confirmed' if you allowed it
-                created_at: new Date().toISOString(),
-              })
-              .select('ride_id')
-              .single();
+  const acceptGroup = async (group) => {
+    // Safety check to prevent map on undefined
+    if (!group || !Array.isArray(group.requestIds) || group.requestIds.length === 0) {
+      Alert.alert("Error", "Invalid group data - no requests found");
+      console.log("Bad group:", group);
+      return;
+    }
 
-            if (rideErr) throw rideErr;
+    Alert.alert(
+      "Accept Group?",
+      `${group.pickup} → ${group.destination}\n` +
+      `${group.riderCount} rider${group.riderCount > 1 ? 's' : ''}\n` +
+      `${group.totalSeats} seat${group.totalSeats > 1 ? 's' : ''}\n` +
+      `Each rider pays ≈ ₹${group.perRiderFare}\n` +
+      `You earn: ₹${group.totalEarnings}`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Accept",
+          onPress: async () => {
+            try {
+              // 1. Create ride
+              const { data: ride, error: rideErr } = await supabase
+                .from('rides')
+                .insert({
+                  driver_id: driverId,
+                  ride_status: 'ongoing', // change to 'confirmed' if you allowed it
+                  created_at: new Date().toISOString(),
+                })
+                .select('ride_id')
+                .single();
 
-            const rideId = ride.ride_id;
+              if (rideErr) throw rideErr;
 
-            // 2. Assign requests
-            const assignments = group.requestIds.map(id => ({
-              request_id: id,
-              ride_id: rideId,
-            }));
+              const rideId = ride.ride_id;
 
-            const { error: assignErr } = await supabase
-              .from('ride_assignments')
-              .insert(assignments);
+              // 2. Assign requests
+              const assignments = group.requestIds.map(id => ({
+                request_id: id,
+                ride_id: rideId,
+              }));
 
-            if (assignErr) throw assignErr;
+              const { error: assignErr } = await supabase
+                .from('ride_assignments')
+                .insert(assignments);
 
-            // 3. Update request statuses
-            const { error: updateErr } = await supabase
-              .from('ride_requests')
-              .update({ request_status: 'accepted' })
-              .in('request_id', group.requestIds);
+              if (assignErr) throw assignErr;
 
-            if (updateErr) throw updateErr;
+              // 3. Update request statuses
+              const { error: updateErr } = await supabase
+                .from('ride_requests')
+                .update({ request_status: 'accepted' })
+                .in('request_id', group.requestIds);
 
-            Alert.alert(
-              "Success",
-              "Group accepted! Ride created.",
-              [
-                {
-                  text: "OK",
-                  onPress: () => {
-                    // Redirect to driver home after alert is dismissed
-                    router.replace('/(tabs)/driver-home');
+              if (updateErr) throw updateErr;
+
+              Alert.alert(
+                "Success",
+                "Group accepted! Ride created.",
+                [
+                  {
+                    text: "OK",
+                    onPress: () => {
+                      router.replace('/(tabs)/driver-home');
+                    },
                   },
-                },
-              ]
-            );
+                ]
+              );
 
-            // Remove accepted group from list
-            setGroups(prev => prev.filter(g => g.key !== group.key));
-          } catch (err) {
-            console.error("Accept failed:", err);
-            Alert.alert("Error", err.message || "Failed to accept group");
-          }
+              // Remove from UI
+              setGroups(prev => prev.filter(g => g.key !== group.key));
+            } catch (err) {
+              console.error("Accept failed:", err);
+              Alert.alert("Error", err.message || "Failed to accept group");
+            }
+          },
         },
-      },
-    ]
-  );
-};
+      ]
+    );
+  };
+
   const renderGroup = ({ item }) => (
     <View style={styles.card}>
       <View style={styles.routeRow}>
@@ -171,7 +187,7 @@ const acceptGroup = async (group) => {
       <Text style={styles.earnings}>
         Earnings: ₹{item.totalEarnings}
         {'\n'}
-        <Text style={styles.earningsDetail}>(each rider pays ≈ ₹{item.perRider})</Text>
+        <Text style={styles.earningsDetail}>(each rider ≈ ₹{item.perRiderFare})</Text>
       </Text>
 
       <TouchableOpacity style={styles.acceptBtn} onPress={() => acceptGroup(item)}>
